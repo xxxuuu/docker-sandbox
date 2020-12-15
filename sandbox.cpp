@@ -9,6 +9,8 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 
+#define LOG 1
+
 const pid_t SANDBOX_UID = 1111;
 const pid_t SANDBOX_GID = 1111;
 
@@ -30,9 +32,9 @@ void *watcher_thread(void *arg) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 12 + 1) {
-        fprintf(stderr, "Error: need 12 arguments\n");
-        fprintf(stderr, "Usage: %s program file_stdin file_stdout file_stderr time_limit time_limit_reserve memory_limit memory_limit_reserve large_stack output_limit process_limit file_result\n", argv[0]);
+    if (argc != 10 + 1) {
+        fprintf(stderr, "Error: need 10 arguments\n");
+        fprintf(stderr, "Usage: %s program file_stdin file_stdout file_stderr time_limit memory_limit large_stack output_limit process_limit file_result\n", argv[0]);
         return 1;
     }
 
@@ -45,24 +47,22 @@ int main(int argc, char **argv) {
          *file_stdin = argv[2],
          *file_stdout = argv[3],
          *file_stderr = argv[4],
-         *file_result = argv[12];
+         *file_result = argv[10];
     long time_limit = parse_long(argv[5]),
-         time_limit_reserve = parse_long(argv[6]),
-         memory_limit = parse_long(argv[7]),
-         memory_limit_reserve = parse_long(argv[8]),
-         large_stack = parse_long(argv[9]),
-         output_limit = parse_long(argv[10]),
-         process_limit = parse_long(argv[11]);
+         memory_limit = parse_long(argv[6]),
+         large_stack = parse_long(argv[7]),
+         output_limit = parse_long(argv[8]),
+         process_limit = parse_long(argv[9]);
 
-    time_limit_to_watch = time_limit + time_limit_reserve;
+    time_limit_to_watch = time_limit*1000;
 
 #ifdef LOG
     printf("Program: %s\n", program);
     printf("Standard input file: %s\n", file_stdin);
     printf("Standard output file: %s\n", file_stdout);
     printf("Standard error file: %s\n", file_stderr);
-    printf("Time limit (seconds): %lu + %lu\n", time_limit, time_limit_reserve);
-    printf("Memory limit (kilobytes): %lu + %lu\n", memory_limit, memory_limit_reserve);
+    printf("Time limit (millisecond): %lu\n", time_limit);
+    printf("Memory limit (kilobytes): %lu\n", memory_limit);
     printf("Output limit (bytes): %lu\n", output_limit);
     printf("Process limit: %lu\n", process_limit);
     printf("Result file: %s\n", file_result);
@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
         } else {
             // Signaled
             int sig = WTERMSIG(status);
-            if (sig == SIGXCPU || usage.ru_utime.tv_sec > time_limit || time_limit_exceeded_killed) {
+            if (sig == SIGXCPU || usage.ru_utime.tv_sec > time_limit*1000 || time_limit_exceeded_killed) {
                 fprintf(fresult, "Time Limit Exceeded\nWEXITSTATUS() = %d, WTERMSIG() = %d (%s)\n", WEXITSTATUS(status), sig, strsignal(sig));
             } else if (sig == SIGXFSZ) {
                 fprintf(fresult, "Output Limit Exceeded\nWEXITSTATUS() = %d, WTERMSIG() = %d (%s)\n", WEXITSTATUS(status), sig, strsignal(sig));
@@ -114,8 +114,8 @@ int main(int argc, char **argv) {
 #ifdef LOG
         printf("memory_usage = %ld\n", usage.ru_maxrss);
 #endif
-        if (time_limit_exceeded_killed) fprintf(fresult, "%ld\n", time_limit_to_watch * 1000000);
-        else fprintf(fresult, "%ld\n", usage.ru_utime.tv_sec * 1000000 + usage.ru_utime.tv_usec);
+        if (time_limit_exceeded_killed) fprintf(fresult, "%ld\n", time_limit_to_watch/1000);
+        else fprintf(fresult, "%ld\n", usage.ru_utime.tv_sec * 1000 + usage.ru_utime.tv_usec/1000);
         fprintf(fresult, "%ld\n", usage.ru_maxrss);
 
         fclose(fresult);
@@ -128,15 +128,15 @@ int main(int argc, char **argv) {
 
         if (time_limit) {
             struct rlimit lim;
-            lim.rlim_cur = time_limit + time_limit_reserve;
-            lim.rlim_max = time_limit + time_limit_reserve;
+            lim.rlim_cur = time_limit*1000;
+            lim.rlim_max = time_limit*1000;
             setrlimit(RLIMIT_CPU, &lim);
         }
 
         if (memory_limit) {
             struct rlimit lim;
-            lim.rlim_cur = (memory_limit + memory_limit_reserve) * 1024;
-            lim.rlim_max = (memory_limit + memory_limit_reserve) * 1024;
+            lim.rlim_cur = memory_limit * 1024;
+            lim.rlim_max = memory_limit * 1024;
             setrlimit(RLIMIT_AS, &lim);
             if (large_stack) {
                 setrlimit(RLIMIT_STACK, &lim);
